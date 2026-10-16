@@ -257,8 +257,10 @@ function fail(my){
 }
 // 대기 슬롯(lobby)은 만남만 주선하고, 실제 게임은 임의 ID의 개인 방(peer)에서 진행해요.
 // 그래서 매칭이 끝나면 슬롯이 바로 비어요.
-function hostWait(p,my){
+function hostWait(p,my,slot){
   lobby=p;let taken=false,going=false;
+  // 0번이 아닌 슬롯에서 기다리는 사람은 10초 뒤 처음부터 다시 훑어, 먼저 기다리던 사람을 찾아가요(서로 다른 슬롯에서 영영 기다리는 상황 방지)
+  if(slot>0)setTimeout(()=>{if(my===session&&!taken)find();},10000);
   showOv('상대를 기다리는 중…','다른 사람이 접속하면 바로 시작돼요.','취소',cancel);
   p.on('connection',c=>{
     if(taken||my!==session){c.on('open',()=>c.close());return;}
@@ -299,6 +301,7 @@ function joinSlot(id,my){
     p.on('open',()=>{
       const c=p.connect(id,{serialization:'json',reliable:true});
       c.on('error',()=>fin(false));
+      c.on('open',()=>{clearTimeout(tm);tm=setTimeout(()=>fin(false),12000);}); // 연결이 열리면 대기 시간을 늘림
       c.on('close',()=>fin(false)); // 'go'를 받은 뒤의 종료는 무시됨
       c.on('data',d=>{
         if(!d||d.t!=='go'||done||typeof d.id!=='string'||!/^[\w.-]{1,64}$/.test(d.id))return;
@@ -316,14 +319,14 @@ function joinSlot(id,my){
     });
   });
 }
-function trySlot(id,my){
+function trySlot(id,my,slot){
   return new Promise(res=>{
     let done=false;
     const fin=v=>{if(!done){done=true;res(v);}};
     const p=new Peer(id);
     p.on('open',()=>{
       if(my!==session){p.destroy();return fin(true);}
-      hostWait(p,my);fin(true);
+      hostWait(p,my,slot);fin(true);
     });
     p.on('error',e=>{
       if(done)return;
@@ -337,7 +340,7 @@ async function find(){
   showOv('상대를 찾는 중…','잠시만 기다려 주세요.','취소',cancel);
   for(let r=0;r<2&&my===session;r++)
     for(let i=0;i<SLOTS&&my===session;i++)
-      if(await trySlot(LOBBY+i,my))return;
+      if(await trySlot(LOBBY+i,my,i))return;
   if(my===session)showOv('연결에 실패했어요','잠시 후 다시 시도해 주세요.','다시 찾기',startFind);
 }
 function cancel(){cleanup();stopLocal();state='menu';showOv('땅따먹기 대전',MENU_MSG,'상대 찾기',startFind,true);}
@@ -357,6 +360,7 @@ async function ensureLocal(){
 }
 async function startFind(){
   if(!consented){if(!$('ag').checked)return;consented=true;}
+  if(typeof Peer==='undefined'){showOv('연결 모듈을 불러오지 못했어요','peerjs.min.js 파일이 이 페이지와 같은 폴더에 올라가 있는지 확인해 주세요.','다시 시도',startFind);return;}
   if(!(await ensureLocal())){
     showOv('카메라 권한이 필요해요','브라우저의 카메라·마이크 권한(HTTPS 필요)을 허용한 뒤 다시 시도해 주세요.','다시 시도',startFind);return;
   }
