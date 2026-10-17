@@ -77,10 +77,10 @@ button:focus-visible{outline:3px solid #ff6fae;outline-offset:3px}
 <script>
 /*LOGIC_START*/
 const FW=1000,FH=600,B=20,GC=50,GR=30,C0=10,C1=39,ZW=30,HOLE0=13,HOLE1=16;
-const BR=7,RH=90,RW=8,RS=520,SP0=330,SPMAX=560,MAXB=8;
+const BR=7,RH=90,RW=8,RS=520,SP0=330,SPMAX=560,MAXB=30;
 let ty=new Uint8Array(GC*GR),own=new Uint8Array(GC*GR),sp=new Uint8Array(GC*GR);
-// ty: 0 빈칸·구멍, 1 견고한 벽돌, 2 깨지는 벽돌 / own: 칸 주인(1,2) / sp: 특수 벽돌 0 없음, 1 폭탄, 2 +1공, 3 +2공, 4 가로줄 제거, 5 세로줄 제거
-let rk=[0,300,300],rd=[0,0,0],bl=[null,[],[]],cd=[0,3,3],sc=[0,0,0],gv=0,regenT=0;
+// ty: 0 빈칸·구멍, 1 견고한 벽돌, 2 깨지는 벽돌 / own: 칸 주인(1,2) / sp: 특수 벽돌 0 없음, 1 폭탄(11x11), 2 +9공, 3 +2공, 4 가로줄 제거, 5 세로줄 제거
+let rk=[0,300,300],rd=[0,0,0],bl=[null,[],[]],cd=[0,3,3],sc=[0,0,0],gv=0,over=false;
 const isHole=r=>r>=HOLE0&&r<=HOLE1;
 function buildWall(skip){
   sp.fill(0);
@@ -107,7 +107,7 @@ function initGame(){
   ty.fill(0);own.fill(0);
   for(let r=0;r<GR;r++){for(let c=0;c<C0;c++)own[r*GC+c]=1;for(let c=C1+1;c<GC;c++)own[r*GC+c]=2;}
   bl=[null,[],[]];buildWall(false);
-  rk=[0,300,300];rd=[0,0,0];cd=[0,3,3];sc=[0,0,0];regenT=0;gv++;
+  rk=[0,300,300];rd=[0,0,0];cd=[0,3,3];sc=[0,0,0];over=false;gv++;
   calc();
 }
 function spawn(k){
@@ -143,12 +143,12 @@ function destroy(k,start){ // 벽돌 하나를 깨고, 특수 벽돌이면 효�
     const s=sp[i];sp[i]=0;
     if(!s)continue;
     const c=i%GC,r=(i-c)/GC;
-    if(s===1){ // 폭탄: 상하좌우 칸도 함께 터짐(자기 포함 5칸)
-      for(const[dr,dc]of[[-1,0],[1,0],[0,-1],[0,1]]){
+    if(s===1){ // 폭탄: 폭탄이 중심인 11x11 사각형(상하좌우 5칸씩)이 터짐
+      for(let dr=-5;dr<=5;dr++)for(let dc=-5;dc<=5;dc++){
         const rr=r+dr,cc=c+dc;
         if(rr>=0&&rr<GR&&cc>C0&&cc<C1)q.push(rr*GC+cc);
       }
-    }else if(s===2||s===3)addBalls(k,c*B+B/2,r*B+B/2,s-1);
+    }else if(s===2||s===3)addBalls(k,c*B+B/2,r*B+B/2,s===2?9:2); // +9 / +2
     else if(s===4){for(let cc=C0+1;cc<C1;cc++)q.push(r*GC+cc);}     // 가로줄 제거
     else if(s===5){for(let rr=0;rr<GR;rr++)q.push(rr*GC+c);}        // 세로줄 제거
   }
@@ -161,7 +161,7 @@ function breakBricks(k,list){
   gv++;calc();
   let left=false;
   for(let m=0;m<ty.length;m++)if(ty[m]===2){left=true;break;}
-  if(!left)regenT=2.5; // 벽돌을 다 깨면 잠시 뒤 벽이 다시 생김
+  if(!left){over=true;bl=[null,[],[]];cd=[0,0,0];rd=[0,0,0];} // 벽돌을 다 깨면 게임 종료: 공도 더 만들지 않고 진행하지 않음
 }
 function racketHit(b,k){
   const rel=Math.max(-1,Math.min(1,(b.y-rk[k])/(RH/2+BR)));
@@ -195,12 +195,12 @@ function stepBall(k,b,dt){
   }
 }
 function update(dt){
+  if(over)return;
   for(let k=1;k<=2;k++){
     rk[k]=Math.max(RH/2,Math.min(FH-RH/2,rk[k]+rd[k]*RS*dt));
     for(const b of bl[k].slice())stepBall(k,b,dt);
     if(!bl[k].length){cd[k]-=dt;if(cd[k]<=0){cd[k]=0;spawn(k);}}
   }
-  if(regenT>0){regenT-=dt;if(regenT<=0){regenT=0;buildWall(true);gv++;calc();}}
 }
 const zi=m=>Math.floor(m/ZW)*GC+C0+m%ZW,ZN=GR*ZW;
 function encG(){
@@ -256,7 +256,7 @@ const bOk=b=>b===null||(Array.isArray(b)&&b.length===4&&b.every(isN));
 function stOk(d){
   return Array.isArray(d.p)&&d.p.length===2&&d.p.every(isN)&&Array.isArray(d.b)&&d.b.length===2&&d.b.every(a=>Array.isArray(a)&&a.length<=MAXB&&a.every(bOk))
     &&Array.isArray(d.cd)&&d.cd.length===2&&d.cd.every(isN)&&Array.isArray(d.s)&&d.s.length===2&&d.s.every(isN)
-    &&(d.g===undefined||decOk(d.g));
+    &&(d.g===undefined||decOk(d.g))&&(d.o===undefined||d.o===0||d.o===1);
 }
 function onData(d){
   if(!d||typeof d!=='object')return;
@@ -264,11 +264,11 @@ function onData(d){
   else if(role===2&&d.t==='st'&&stOk(d)){
     rk=[0,d.p[0],d.p[1]];cd=[0,d.cd[0],d.cd[1]];sc=[0,d.s[0],d.s[1]];
     const mb=a=>a.map(q=>({x:q[0],y:q[1],vx:q[2],vy:q[3]}));bl=[null,mb(d.b[0]),mb(d.b[1])];
-    if(d.g){decG(d.g);calc();}else hud();
+    over=d.o===1;if(d.g){decG(d.g);calc();}else hud();
   }
 }
 function setDir(v){
-  if(state!=='play')return;
+  if(state!=='play'||over)return;
   if(role===1)rd[1]=v;
   else if(role===2){rd[2]=v;if(conn&&conn.open)conn.send({t:'in',d:v});}
 }
@@ -444,7 +444,7 @@ function vid(v,r){ // 카메라 영상을 영역 r에 꽉 차게(자르기) 그�
   lg.drawImage(v,(r.w-dw)/2,r.y+(r.h-dh)/2,dw,dh);
   lg.restore();return true;
 }
-const SPC=['','#b3261e','#2e8b57','#1e88a8','#7e57c2','#e08a1e'],SPT=['','💣','+1','+2','↔','↕'];
+const SPC=['','#b3261e','#2e8b57','#1e88a8','#7e57c2','#e08a1e'],SPT=['','💣','+9','+2','↔','↕'];
 function drawSp(s,x,y){
   g.fillStyle=SPC[s];g.fillRect(x+1,y+1,B-2,B-2);
   g.fillStyle='#fff';g.font=(s===1?'13px':'bold 12px')+' system-ui,sans-serif';g.textAlign='center';g.textBaseline='middle';
@@ -485,6 +485,12 @@ function draw(){
       g.strokeText(Math.ceil(cd[k]),cx,300);g.fillText(Math.ceil(cd[k]),cx,300);
     }
   }
+  if(over){ // 게임 종료 안내(카메라는 그대로 보이고 대화는 계속할 수 있음)
+    g.fillStyle='rgba(11,28,32,.82)';g.fillRect(200,14,600,88);
+    g.textAlign='center';g.textBaseline='middle';g.fillStyle='#f1ead2';
+    g.font='bold 26px "Black Han Sans",system-ui,sans-serif';g.fillText('게임 종료 · 벽돌을 모두 깼어요',500,40);
+    g.font='16px system-ui,sans-serif';g.fillText('나 '+sc[me]+'개 · 상대 '+sc[3-me]+'개 — 새 게임은 \'다른 상대 찾기\'로 새 상대를 만나야 시작돼요',500,78);
+  }
 }
 function loop(t){
   const dt=Math.min((t-last)/1000,.05);last=t;
@@ -496,7 +502,7 @@ function loop(t){
       if(sendT>=.05&&conn&&conn.open){
         sendT=0;
         const r1=v=>Math.round(v*10)/10,ba=b=>b?[r1(b.x),r1(b.y),r1(b.vx),r1(b.vy)]:null;
-        const m={t:'st',p:[r1(rk[1]),r1(rk[2])],b:[bl[1].map(ba),bl[2].map(ba)],cd:[r1(cd[1]),r1(cd[2])],s:[sc[1],sc[2]]};
+        const m={t:'st',p:[r1(rk[1]),r1(rk[2])],b:[bl[1].map(ba),bl[2].map(ba)],cd:[r1(cd[1]),r1(cd[2])],s:[sc[1],sc[2]],o:over?1:0};
         if(gv!==lastGv||++fullT>=40){m.g=encG();lastGv=gv;fullT=0;}
         conn.send(m);
       }
@@ -524,7 +530,7 @@ cv.addEventListener('pointermove',e=>{
 });
 ['pointerup','pointercancel'].forEach(ev=>cv.addEventListener(ev,()=>{clearTimeout(stopT);setDir(0);}));
 
-const MENU_MSG='왼쪽(노랑) 또는 오른쪽(분홍) 끝에서 라켓을 위아래로 움직여 공을 튕기세요. 가운데 벽의 구멍으로 공을 넣으면 안쪽 벽돌을 깰 수 있고, 깬 자리에는 카메라 화면이 나타나요. 내 구역과 내가 깬 자리에는 상대 카메라가 보여요. 상대 쪽 구멍은 내 공을 막아요. 벽 안에는 특수 벽돌 10개가 숨어 있어요: 💣폭탄(상하좌우 터짐), +1·+2(그 자리에서 공 추가), ↔가로줄 제거, ↕세로줄 제거. 공을 놓치면 5초 뒤 새 공이 나와요. 승패는 없어요. 카메라·마이크는 상대에게만 직접 전달돼요.';
+const MENU_MSG='왼쪽(노랑) 또는 오른쪽(분홍) 끝에서 라켓을 위아래로 움직여 공을 튕기세요. 가운데 벽의 구멍으로 공을 넣으면 안쪽 벽돌을 깰 수 있고, 깬 자리에는 카메라 화면이 나타나요. 내 구역과 내가 깬 자리에는 상대 카메라가 보여요. 상대 쪽 구멍은 내 공을 막아요. 벽 안에는 특수 벽돌 10개가 숨어 있어요: 💣폭탄(폭탄이 중심인 11×11 칸이 터짐), +9·+2(그 자리에서 공 9개·2개 추가), ↔가로줄 제거, ↕세로줄 제거. 벽돌을 모두 깨면 게임이 끝나고, 새 게임은 새로운 상대와 매칭될 때만 시작돼요. 공을 놓치면 5초 뒤 새 공이 나와요. 승패는 없어요. 카메라·마이크는 상대에게만 직접 전달돼요.';
 initGame();
 showOv('벽돌깨기 대전',MENU_MSG,'상대 찾기',startFind,true);
 requestAnimationFrame(loop);
