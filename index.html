@@ -40,7 +40,9 @@ button{font:inherit;font-size:16px;padding:8px 20px;border:0;border-radius:4px;b
 #ptt.on{background:#f4b942}
 button:disabled{opacity:.5;cursor:not-allowed}
 #ov{overflow:auto;justify-content:flex-start}
-#ov>h1{margin-top:auto}#ov>button{margin-bottom:auto}
+#ov>h1{margin-top:auto}#ov>button:last-child{margin-bottom:auto}
+#obs{background:transparent;color:var(--land);border:2px solid var(--land);font-size:16px}
+body.solo #mic,body.solo #echo,body.solo #ptt{display:none}
 #gate{max-width:36em;font-size:clamp(12px,2.3vw,14px);line-height:1.6;text-align:left}
 #gate p{margin:0 0 8px;color:#ffd9a0;font-size:inherit}
 #gate label{display:block}
@@ -59,6 +61,7 @@ button:focus-visible{outline:3px solid #ff6fae;outline-offset:3px}
   <button id="echo" title="스피커로 들을 때 소리가 되울리는(에코) 걸 막아요">에코 방지: 꺼짐</button>
   <button id="ptt" hidden>🎙 누르고 있는 동안 말하기</button>
   <button id="re">다른 상대 찾기</button>
+  <button id="solo">혼자 플레이</button>
 </div>
 <div id="wrap">
   <canvas id="c" aria-label="벽돌깨기 대전 화면"></canvas>
@@ -69,7 +72,8 @@ button:focus-visible{outline:3px solid #ff6fae;outline-offset:3px}
       <p>⚠ 낯선 사람과 카메라·마이크로 연결돼요. 상대에게 내 IP 주소가 보일 수 있고, 상대가 화면을 녹화·캡처할 수 있어요. 불쾌하면 언제든 ‘다른 상대 찾기’로 나갈 수 있어요.</p>
       <label><input type="checkbox" id="ag"> 만 19세 이상이며 <a href="privacy.html" target="_blank" rel="noopener">개인정보처리방침·이용 안내</a>에 동의합니다.</label>
     </div>
-    <button id="ob"></button></div>
+    <button id="ob"></button>
+    <button id="obs">혼자 플레이하기</button></div>
 </div>
 <div id="foot"><a href="privacy.html">개인정보처리방침 · 이용 안내</a></div>
 <div id="help">위/아래 방향키(W/S) 또는 화면을 위아래로 밀어 라켓을 움직여요 · 스피커로 들을 땐 '에코 방지'를 켜 보세요</div>
@@ -161,7 +165,7 @@ function breakBricks(k,list){
   gv++;calc();
   let left=false;
   for(let m=0;m<ty.length;m++)if(ty[m]===2){left=true;break;}
-  if(!left){over=true;bl=[null,[],[]];cd=[0,0,0];rd=[0,0,0];} // 벽돌을 다 깨면 게임 종료: 공도 더 만들지 않고 진행하지 않음
+  if(!left)over=true; // 벽돌을 다 깨면 새 공만 더 이상 만들지 않음
 }
 function racketHit(b,k){
   const rel=Math.max(-1,Math.min(1,(b.y-rk[k])/(RH/2+BR)));
@@ -172,7 +176,7 @@ function racketHit(b,k){
 function miss(k,b){ // 놓친 공은 사라지고, 공이 하나도 없으면 5초 뒤 새 공
   const i=bl[k].indexOf(b);
   if(i>=0)bl[k].splice(i,1);
-  if(!bl[k].length)cd[k]=5;
+  if(!bl[k].length&&!over)cd[k]=5;
 }
 function stepBall(k,b,dt){
   const n=Math.max(1,Math.ceil(Math.hypot(b.vx,b.vy)*dt/4)),h=dt/n;
@@ -195,11 +199,10 @@ function stepBall(k,b,dt){
   }
 }
 function update(dt){
-  if(over)return;
   for(let k=1;k<=2;k++){
     rk[k]=Math.max(RH/2,Math.min(FH-RH/2,rk[k]+rd[k]*RS*dt));
     for(const b of bl[k].slice())stepBall(k,b,dt);
-    if(!bl[k].length){cd[k]-=dt;if(cd[k]<=0){cd[k]=0;spawn(k);}}
+    if(!bl[k].length&&!over){cd[k]-=dt;if(cd[k]<=0){cd[k]=0;spawn(k);}}
   }
 }
 const zi=m=>Math.floor(m/ZW)*GC+C0+m%ZW,ZN=GR*ZW;
@@ -223,11 +226,12 @@ const lv=$('lv'),rv=$('rv');
 const LOBBY='brick-lobby-v1-',SLOTS=20;
 const COL=['','#f4b942','#ff6fae'];
 const TINT=['','rgba(244,185,66,.18)','rgba(255,111,174,.18)'],SOLID=['','rgba(244,185,66,.7)','rgba(255,111,174,.7)'];
-let consented=false,echoMode=false,role=0,state='menu',last=0,sendT=0,lastGv=-1,fullT=0,rkd=[0,300,300];
+let solo=false,soloStream=null,consented=false,echoMode=false,role=0,state='menu',last=0,sendT=0,lastGv=-1,fullT=0,rkd=[0,300,300];
 let local=null,peer=null,lobby=null,conn=null,call=null,session=0,obAct=null;
 
 function hud(){
   const me=role||1,you=3-me;
+  document.querySelector('#hud span:nth-child(2)').firstChild.textContent=solo?'자동 상대 ':'상대';
   $('me').textContent=sc[me]+'개';$('me').style.color=COL[me];
   $('you').textContent=sc[you]+'개';$('you').style.color=COL[you];
 }
@@ -268,7 +272,7 @@ function onData(d){
   }
 }
 function setDir(v){
-  if(state!=='play'||over)return;
+  if(state!=='play')return;
   if(role===1)rd[1]=v;
   else if(role===2){rd[2]=v;if(conn&&conn.open)conn.send({t:'in',d:v});}
 }
@@ -398,7 +402,11 @@ async function ensureLocal(){
   return true;
 }
 async function startFind(){
-  if(!consented){if(!$('ag').checked)return;consented=true;}
+  if(!consented){
+    if(!$('ag').checked){endSolo();cleanup();state='menu';showOv('벽돌깨기 대전',MENU_MSG,'상대 찾기',startFind,true);return;}
+    consented=true;
+  }
+  endSolo();
   if(typeof Peer==='undefined'){showOv('연결 모듈을 불러오지 못했어요','peerjs.min.js 파일이 이 페이지와 같은 폴더에 올라가 있는지 확인해 주세요.','다시 시도',startFind);return;}
   if(!(await ensureLocal())){
     showOv('카메라 권한이 필요해요','브라우저의 카메라·마이크 권한(HTTPS 필요)을 허용한 뒤 다시 시도해 주세요.','다시 시도',startFind);return;
@@ -434,7 +442,43 @@ $('ag').onchange=()=>{$('ob').disabled=!$('ag').checked;};
 $('ob').onclick=()=>obAct&&obAct();
 
 
+/* ---------- 혼자 플레이 ---------- */
+function endSolo(){
+  solo=false;document.body.classList.remove('solo');
+  if(soloStream){
+    soloStream.getTracks().forEach(t=>t.stop());
+    if(lv.srcObject===soloStream)lv.srcObject=null;
+    soloStream=null;
+  }
+}
+async function startSolo(){ // 상대 자리는 빈 종이 화면, 상대 라켓은 공을 자동으로 따라다님
+  cleanup();stopLocal();endSolo();
+  solo=true;document.body.classList.add('solo');
+  try{ // 내 카메라는 이 기기 안에서만 쓰고 어디로도 보내지 않음(마이크는 쓰지 않음)
+    soloStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:960},height:{ideal:720}},audio:false});
+    lv.srcObject=soloStream;lv.play().catch(()=>{});
+  }catch(e){soloStream=null;}
+  track('solo_start');
+  role=1;initGame();state='play';$('ov').style.display='none';last=performance.now();
+}
+function aiMove(){ // 상대(오른쪽) 라켓이 오른쪽으로 오는 공을 따라다님
+  const bs=bl[2];
+  if(!bs.length){rd[2]=0;return;}
+  let t=null;
+  for(const b of bs)if(b.vx>0&&(!t||b.x>t.x))t=b;
+  if(!t)for(const b of bs)if(!t||b.x>t.x)t=b;
+  const d=t.y-rk[2];
+  rd[2]=Math.abs(d)<5?0:(d>0?1:-1);
+}
+$('solo').onclick=startSolo;$('obs').onclick=startSolo;
+
 /* ---------- 그리기 ---------- */
+function paper(r){ // 빈 종이 같은 화면
+  lg.fillStyle='#f4efe1';lg.fillRect(r.x,r.y,r.w,r.h);
+  lg.strokeStyle='rgba(120,100,60,.13)';lg.lineWidth=1;lg.beginPath();
+  for(let y=r.y+24;y<r.y+r.h;y+=24){lg.moveTo(r.x,y+.5);lg.lineTo(r.x+r.w,y+.5);}
+  lg.stroke();return true;
+}
 function vid(v,r){ // 카메라 영상을 영역 r에 꽉 차게(자르기) 그림. 모든 영상은 같은 방향으로 좌우 반전
   const vw=v.videoWidth,vh=v.videoHeight;
   if(!vw)return false;
@@ -459,7 +503,8 @@ function draw(){
     lg.globalCompositeOperation='source-over';lg.clearRect(0,0,FW,FH);
     // 소유자 1(왼쪽)의 카메라 화면은 x 0~800, 소유자 2(오른쪽)의 카메라 화면은 x 200~1000 전체에 걸친 하나의 화면.
     // 마스크(내 영역 + 내가 깬 칸)에 해당하는 부분만 보임
-    if(vid(cam,k===1?{x:0,y:0,w:800,h:600}:{x:200,y:0,w:800,h:600})){
+    const rect=k===1?{x:0,y:0,w:800,h:600}:{x:200,y:0,w:800,h:600};
+    if((solo&&cam===rv)?paper(rect):vid(cam,rect)){
       lg.globalCompositeOperation='destination-in';lg.imageSmoothingEnabled=false;
       lg.drawImage(mks[k],0,0,FW,FH);g.drawImage(ly,0,0);ok[k]=true;
     }
@@ -478,24 +523,19 @@ function draw(){
     g.fillStyle=COL[k];g.fillRect(x,y,RW,RH);
     if(k===me){g.strokeStyle='#fff';g.lineWidth=2;g.strokeRect(x-3,y-3,RW+6,RH+6);}
     for(const b of bl[k]){g.fillStyle='#f1ead2';g.beginPath();g.arc(b.x,b.y,BR,0,7);g.fill();g.strokeStyle=COL[k];g.lineWidth=3;g.stroke();}
-    if(!bl[k].length&&cd[k]>0){
+    if(!bl[k].length&&cd[k]>0&&!over){
       g.font='bold 72px "Black Han Sans",system-ui,sans-serif';g.textAlign='center';g.textBaseline='middle';
       g.lineWidth=6;g.strokeStyle='rgba(11,28,32,.85)';g.fillStyle='#f1ead2';
       const cx=k===1?100:900;
       g.strokeText(Math.ceil(cd[k]),cx,300);g.fillText(Math.ceil(cd[k]),cx,300);
     }
   }
-  if(over){ // 게임 종료 안내(카메라는 그대로 보이고 대화는 계속할 수 있음)
-    g.fillStyle='rgba(11,28,32,.82)';g.fillRect(200,14,600,88);
-    g.textAlign='center';g.textBaseline='middle';g.fillStyle='#f1ead2';
-    g.font='bold 26px "Black Han Sans",system-ui,sans-serif';g.fillText('게임 종료 · 벽돌을 모두 깼어요',500,40);
-    g.font='16px system-ui,sans-serif';g.fillText('나 '+sc[me]+'개 · 상대 '+sc[3-me]+'개 — 새 게임은 \'다른 상대 찾기\'로 새 상대를 만나야 시작돼요',500,78);
-  }
 }
 function loop(t){
   const dt=Math.min((t-last)/1000,.05);last=t;
   if(state==='play'){
     if(role===1){
+      if(solo)aiMove();
       update(dt);
       rkd=[0,rk[1],rk[2]];
       sendT+=dt;
@@ -530,7 +570,7 @@ cv.addEventListener('pointermove',e=>{
 });
 ['pointerup','pointercancel'].forEach(ev=>cv.addEventListener(ev,()=>{clearTimeout(stopT);setDir(0);}));
 
-const MENU_MSG='왼쪽(노랑) 또는 오른쪽(분홍) 끝에서 라켓을 위아래로 움직여 공을 튕기세요. 가운데 벽의 구멍으로 공을 넣으면 안쪽 벽돌을 깰 수 있고, 깬 자리에는 카메라 화면이 나타나요. 내 구역과 내가 깬 자리에는 상대 카메라가 보여요. 상대 쪽 구멍은 내 공을 막아요. 벽 안에는 특수 벽돌 10개가 숨어 있어요: 💣폭탄(폭탄이 중심인 11×11 칸이 터짐), +9·+2(그 자리에서 공 9개·2개 추가), ↔가로줄 제거, ↕세로줄 제거. 벽돌을 모두 깨면 게임이 끝나고, 새 게임은 새로운 상대와 매칭될 때만 시작돼요. 공을 놓치면 5초 뒤 새 공이 나와요. 승패는 없어요. 카메라·마이크는 상대에게만 직접 전달돼요.';
+const MENU_MSG='왼쪽(노랑) 또는 오른쪽(분홍) 끝에서 라켓을 위아래로 움직여 공을 튕기세요. 가운데 벽의 구멍으로 공을 넣으면 안쪽 벽돌을 깰 수 있고, 깬 자리에는 카메라 화면이 나타나요. 내 구역과 내가 깬 자리에는 상대 카메라가 보여요. 상대 쪽 구멍은 내 공을 막아요. 상대가 없으면 ‘혼자 플레이하기’로 빈 종이 화면과 자동으로 움직이는 상대와 즐길 수 있어요(이때 카메라는 이 기기 안에서만 쓰여요). 벽 안에는 특수 벽돌 10개가 숨어 있어요: 💣폭탄(폭탄이 중심인 11×11 칸이 터짐), +9·+2(그 자리에서 공 9개·2개 추가), ↔가로줄 제거, ↕세로줄 제거. 벽돌을 모두 깨면 새 공이 더 이상 나오지 않아요. 새 게임은 새로운 상대와 매칭될 때만 시작돼요. 공을 놓치면 5초 뒤 새 공이 나와요. 승패는 없어요. 카메라·마이크는 상대에게만 직접 전달돼요.';
 initGame();
 showOv('벽돌깨기 대전',MENU_MSG,'상대 찾기',startFind,true);
 requestAnimationFrame(loop);
