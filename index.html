@@ -169,7 +169,7 @@ function breakBricks(k,list){
 }
 function racketHit(b,k){
   const rel=Math.max(-1,Math.min(1,(b.y-rk[k])/(RH/2+BR)));
-  const s=Math.min(SPMAX,Math.hypot(b.vx,b.vy)+12),a=rel*1.0;
+  const s=Math.min(SPMAX,Math.hypot(b.vx,b.vy)+12),a=rel*0.5; // 라켓 끝에 맞아도 최대 약 29도(rad 0.5)까지만 꺾임
   b.vx=(k===1?1:-1)*s*Math.cos(a);b.vy=s*Math.sin(a);
   b.x=k===1?2+RW+BR:FW-2-RW-BR;
 }
