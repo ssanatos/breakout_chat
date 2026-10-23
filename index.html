@@ -76,15 +76,15 @@ button:focus-visible{outline:3px solid #ff6fae;outline-offset:3px}
     <button id="obs">혼자 플레이하기</button></div>
 </div>
 <div id="foot"><a href="privacy.html">개인정보처리방침 · 이용 안내</a></div>
-<div id="help">위/아래 방향키(W/S) 또는 화면을 위아래로 밀어 라켓을 움직여요 · 스피커로 들을 땐 '에코 방지'를 켜 보세요</div>
+<div id="help">위/아래 방향키(W/S) 또는 화면을 위아래로 드래그해 라켓을 움직여요(터치는 손가락 2 : 라켓 1 비율) · 스피커로 들을 땐 '에코 방지'를 켜 보세요</div>
 
 <script>
 /*LOGIC_START*/
 const FW=1000,FH=600,B=20,GC=50,GR=30,C0=10,C1=39,ZW=30,HOLE0=13,HOLE1=16;
-const BR=7,RH=90,RW=8,RS=520,SP0=330,SPMAX=560,MAXB=30;
+const BR=7,RH=90,RW=8,RS=520,RT=1000,SP0=330,SPMAX=560,MAXB=30;
 let ty=new Uint8Array(GC*GR),own=new Uint8Array(GC*GR),sp=new Uint8Array(GC*GR);
 // ty: 0 빈칸·구멍, 1 견고한 벽돌, 2 깨지는 벽돌 / own: 칸 주인(1,2) / sp: 특수 벽돌 0 없음, 1 폭탄(11x11), 2 +9공, 3 +2공, 4 가로줄 제거, 5 세로줄 제거
-let rk=[0,300,300],rd=[0,0,0],bl=[null,[],[]],cd=[0,3,3],sc=[0,0,0],gv=0,over=false;
+let rk=[0,300,300],rd=[0,0,0],rt=[0,null,null],bl=[null,[],[]],cd=[0,3,3],sc=[0,0,0],gv=0,over=false;
 const isHole=r=>r>=HOLE0&&r<=HOLE1;
 function buildWall(skip){
   sp.fill(0);
@@ -111,7 +111,7 @@ function initGame(){
   ty.fill(0);own.fill(0);
   for(let r=0;r<GR;r++){for(let c=0;c<C0;c++)own[r*GC+c]=1;for(let c=C1+1;c<GC;c++)own[r*GC+c]=2;}
   bl=[null,[],[]];buildWall(false);
-  rk=[0,300,300];rd=[0,0,0];cd=[0,3,3];sc=[0,0,0];over=false;gv++;
+  rk=[0,300,300];rd=[0,0,0];rt=[0,null,null];cd=[0,3,3];sc=[0,0,0];over=false;gv++;
   calc();
 }
 function spawn(k){
@@ -200,7 +200,9 @@ function stepBall(k,b,dt){
 }
 function update(dt){
   for(let k=1;k<=2;k++){
-    rk[k]=Math.max(RH/2,Math.min(FH-RH/2,rk[k]+rd[k]*RS*dt));
+    if(rt[k]!==null){const dd=rt[k]-rk[k],m=RT*dt;rk[k]+=Math.max(-m,Math.min(m,dd));} // 드래그: 목표 위치로 이동
+    else rk[k]+=rd[k]*RS*dt;                                                           // 키보드: 일정 속도
+    rk[k]=Math.max(RH/2,Math.min(FH-RH/2,rk[k]));
     for(const b of bl[k].slice())stepBall(k,b,dt);
     if(!bl[k].length&&!over){cd[k]-=dt;if(cd[k]<=0){cd[k]=0;spawn(k);}}
   }
@@ -264,7 +266,10 @@ function stOk(d){
 }
 function onData(d){
   if(!d||typeof d!=='object')return;
-  if(role===1&&d.t==='in'){if(d.d===-1||d.d===0||d.d===1)rd[2]=d.d;}
+  if(role===1&&d.t==='in'){
+    if(d.d===-1||d.d===0||d.d===1){rd[2]=d.d;rt[2]=null;}
+    else if(isN(d.y)&&d.y>=0&&d.y<=FH)rt[2]=Math.max(RH/2,Math.min(FH-RH/2,d.y));
+  }
   else if(role===2&&d.t==='st'&&stOk(d)){
     rk=[0,d.p[0],d.p[1]];cd=[0,d.cd[0],d.cd[1]];sc=[0,d.s[0],d.s[1]];
     const mb=a=>a.map(q=>({x:q[0],y:q[1],vx:q[2],vy:q[3]}));bl=[null,mb(d.b[0]),mb(d.b[1])];
@@ -273,7 +278,7 @@ function onData(d){
 }
 function setDir(v){
   if(state!=='play')return;
-  if(role===1)rd[1]=v;
+  if(role===1){rd[1]=v;rt[1]=null;}
   else if(role===2){rd[2]=v;if(conn&&conn.open)conn.send({t:'in',d:v});}
 }
 
@@ -560,15 +565,33 @@ function applyHeld(){const u=held.has('u'),d=held.has('d');setDir(u&&!d?-1:d&&!u
 const KMAP={ArrowUp:'u',w:'u',W:'u',ArrowDown:'d',s:'d',S:'d'};
 addEventListener('keydown',e=>{if(KMAP[e.key]){held.add(KMAP[e.key]);applyHeld();e.preventDefault();}});
 addEventListener('keyup',e=>{if(KMAP[e.key]){held.delete(KMAP[e.key]);applyHeld();}});
-let py=0,stopT=0;
-cv.addEventListener('pointerdown',e=>{py=e.clientY;});
-cv.addEventListener('pointermove',e=>{
-  if(!(e.buttons||e.pointerType==='touch'))return;
-  const dy=e.clientY-py;py=e.clientY;
-  if(Math.abs(dy)<1)return;
-  setDir(dy>0?1:-1);clearTimeout(stopT);stopT=setTimeout(()=>setDir(0),90);
+// 터치/마우스 드래그: 손가락이 움직인 만큼의 일정 비율(TOUCH_RATIO)만 라켓이 움직임. 손을 뗐다 다시 대면 현재 라켓 위치에서 이어서 움직임
+const TOUCH_RATIO=0.7,MOUSE_RATIO=1;  // 터치: 손 2 : 라켓 1
+let pStart=null,lastSendT=0;
+function sendTarget(y,force){
+  if(role===1){rt[1]=y;return;}                       // 혼자·호스트: 바로 적용
+  if(role!==2||!conn||!conn.open)return;
+  const now=performance.now();
+  if(!force&&now-lastSendT<33)return;                 // 초당 약 30번만 전송
+  lastSendT=now;conn.send({t:'in',y:Math.round(y)});
+}
+cv.addEventListener('pointerdown',e=>{
+  if(state!=='play')return;
+  const me=role||1;
+  pStart={y:e.clientY,r:(role===2?rkd:rk)[me],ratio:e.pointerType==='touch'?TOUCH_RATIO:MOUSE_RATIO,last:null};
+  try{cv.setPointerCapture(e.pointerId);}catch(_){}
 });
-['pointerup','pointercancel'].forEach(ev=>cv.addEventListener(ev,()=>{clearTimeout(stopT);setDir(0);}));
+cv.addEventListener('pointermove',e=>{
+  if(!pStart||state!=='play')return;
+  if(!(e.buttons||e.pointerType==='touch'))return;
+  const scale=FH/(cv.getBoundingClientRect().height||FH);   // 화면 px → 게임 좌표
+  const y=Math.max(RH/2,Math.min(FH-RH/2,pStart.r+(e.clientY-pStart.y)*scale*pStart.ratio));
+  pStart.last=y;sendTarget(y,false);
+});
+['pointerup','pointercancel'].forEach(ev=>cv.addEventListener(ev,()=>{
+  if(pStart&&pStart.last!==null)sendTarget(pStart.last,true); // 마지막 위치를 확실히 전달, 라켓은 그 자리에 머묾
+  pStart=null;
+}));
 
 const MENU_MSG='왼쪽(노랑) 또는 오른쪽(분홍) 끝에서 라켓을 위아래로 움직여 공을 튕기세요. 가운데 벽의 구멍으로 공을 넣으면 안쪽 벽돌을 깰 수 있고, 깬 자리에는 카메라 화면이 나타나요. 내 구역과 내가 깬 자리에는 상대 카메라가 보여요. 상대 쪽 구멍은 내 공을 막아요. 상대가 없으면 ‘혼자 플레이하기’로 빈 종이 화면과 자동으로 움직이는 상대와 즐길 수 있어요(이때 카메라는 이 기기 안에서만 쓰여요). 벽 안에는 특수 벽돌 10개가 숨어 있어요: 💣폭탄(폭탄이 중심인 11×11 칸이 터짐), +9·+2(그 자리에서 공 9개·2개 추가), ↔가로줄 제거, ↕세로줄 제거. 벽돌을 모두 깨면 새 공이 더 이상 나오지 않아요. 새 게임은 새로운 상대와 매칭될 때만 시작돼요. 공을 놓치면 5초 뒤 새 공이 나와요. 승패는 없어요. 카메라·마이크는 상대에게만 직접 전달돼요.';
 initGame();
