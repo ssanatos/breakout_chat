@@ -27,6 +27,7 @@ html,body{margin:0;min-height:100%;background:var(--page);color:var(--txt);
 body{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;min-height:100vh;
   padding:max(8px,env(safe-area-inset-top)) 8px max(8px,env(safe-area-inset-bottom))}
 #hud{display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:6px 20px;font-size:16px}
+#hud #tm{font-variant-numeric:tabular-nums;min-width:4.6em;display:inline-block;text-align:left}
 #hud b{font-family:"Black Han Sans",system-ui,sans-serif;font-weight:400;font-size:22px;margin-left:6px}
 #wrap{position:relative;width:min(100%,1000px)}
 canvas{width:100%;display:block;border:3px solid var(--land);border-radius:6px;touch-action:none;background:var(--sea)}
@@ -57,6 +58,7 @@ button:focus-visible{outline:3px solid #ff6fae;outline-offset:3px}
 <div id="hud">
   <span>나<b id="me">0%</b></span>
   <span>상대<b id="you">0%</b></span>
+  <span>시간<b id="tm">0:00.0</b></span>
   <button id="mic">마이크 끄기</button>
   <button id="echo" title="스피커로 들을 때 소리가 되울리는(에코) 걸 막아요">에코 방지: 꺼짐</button>
   <button id="ptt" hidden>🎙 누르고 있는 동안 말하기</button>
@@ -84,7 +86,7 @@ const FW=1000,FH=600,B=20,GC=50,GR=30,C0=10,C1=39,ZW=30,HOLE0=13,HOLE1=16;
 const BR=7,RH=90,RW=8,RS=520,RT=1000,SP0=330,SPMAX=560,MAXB=30;
 let ty=new Uint8Array(GC*GR),own=new Uint8Array(GC*GR),sp=new Uint8Array(GC*GR);
 // ty: 0 빈칸·구멍, 1 견고한 벽돌, 2 깨지는 벽돌 / own: 칸 주인(1,2) / sp: 특수 벽돌 0 없음, 1 폭탄(11x11), 2 +9공, 3 +2공, 4 가로줄 제거, 5 세로줄 제거
-let rk=[0,300,300],rd=[0,0,0],rt=[0,null,null],bl=[null,[],[]],cd=[0,3,3],sc=[0,0,0],gv=0,over=false;
+let rk=[0,300,300],rd=[0,0,0],rt=[0,null,null],bl=[null,[],[]],cd=[0,3,3],sc=[0,0,0],gv=0,over=false,el=0;
 const isHole=r=>r>=HOLE0&&r<=HOLE1;
 function buildWall(skip){
   sp.fill(0);
@@ -111,7 +113,7 @@ function initGame(){
   ty.fill(0);own.fill(0);
   for(let r=0;r<GR;r++){for(let c=0;c<C0;c++)own[r*GC+c]=1;for(let c=C1+1;c<GC;c++)own[r*GC+c]=2;}
   bl=[null,[],[]];buildWall(false);
-  rk=[0,300,300];rd=[0,0,0];rt=[0,null,null];cd=[0,3,3];sc=[0,0,0];over=false;gv++;
+  rk=[0,300,300];rd=[0,0,0];rt=[0,null,null];cd=[0,3,3];sc=[0,0,0];over=false;el=0;gv++;
   calc();
 }
 function spawn(k){
@@ -199,6 +201,7 @@ function stepBall(k,b,dt){
   }
 }
 function update(dt){
+  if(!over)el+=dt; // 게임이 시작되면 바로 타이머 시작, 벽돌을 모두 깨면(over) 멈춤
   for(let k=1;k<=2;k++){
     if(rt[k]!==null){const dd=rt[k]-rk[k],m=RT*dt;rk[k]+=Math.max(-m,Math.min(m,dd));} // 드래그: 목표 위치로 이동
     else rk[k]+=rd[k]*RS*dt;                                                           // 키보드: 일정 속도
@@ -262,7 +265,7 @@ const bOk=b=>b===null||(Array.isArray(b)&&b.length===4&&b.every(isN));
 function stOk(d){
   return Array.isArray(d.p)&&d.p.length===2&&d.p.every(isN)&&Array.isArray(d.b)&&d.b.length===2&&d.b.every(a=>Array.isArray(a)&&a.length<=MAXB&&a.every(bOk))
     &&Array.isArray(d.cd)&&d.cd.length===2&&d.cd.every(isN)&&Array.isArray(d.s)&&d.s.length===2&&d.s.every(isN)
-    &&(d.g===undefined||decOk(d.g))&&(d.o===undefined||d.o===0||d.o===1);
+    &&(d.g===undefined||decOk(d.g))&&(d.o===undefined||d.o===0||d.o===1)&&(d.e===undefined||(isN(d.e)&&d.e>=0&&d.e<1e6));
 }
 function onData(d){
   if(!d||typeof d!=='object')return;
@@ -273,7 +276,7 @@ function onData(d){
   else if(role===2&&d.t==='st'&&stOk(d)){
     rk=[0,d.p[0],d.p[1]];cd=[0,d.cd[0],d.cd[1]];sc=[0,d.s[0],d.s[1]];
     const mb=a=>a.map(q=>({x:q[0],y:q[1],vx:q[2],vy:q[3]}));bl=[null,mb(d.b[0]),mb(d.b[1])];
-    over=d.o===1;if(d.g){decG(d.g);calc();}else hud();
+    over=d.o===1;if(d.e!==undefined)el=d.e;if(d.g){decG(d.g);calc();}else hud();
   }
 }
 function setDir(v){
@@ -536,6 +539,11 @@ function draw(){
     }
   }
 }
+function fmt(t){ // 분:초.소수1자리
+  const x=Math.floor(t*10),m=Math.floor(x/600),sec=(x%600)/10;
+  return m+':'+(sec<10?'0':'')+sec.toFixed(1);
+}
+let tmTxt='';
 function loop(t){
   const dt=Math.min((t-last)/1000,.05);last=t;
   if(state==='play'){
@@ -547,15 +555,17 @@ function loop(t){
       if(sendT>=.05&&conn&&conn.open){
         sendT=0;
         const r1=v=>Math.round(v*10)/10,ba=b=>b?[r1(b.x),r1(b.y),r1(b.vx),r1(b.vy)]:null;
-        const m={t:'st',p:[r1(rk[1]),r1(rk[2])],b:[bl[1].map(ba),bl[2].map(ba)],cd:[r1(cd[1]),r1(cd[2])],s:[sc[1],sc[2]],o:over?1:0};
+        const m={t:'st',p:[r1(rk[1]),r1(rk[2])],b:[bl[1].map(ba),bl[2].map(ba)],cd:[r1(cd[1]),r1(cd[2])],s:[sc[1],sc[2]],o:over?1:0,e:Math.round(el*10)/10};
         if(gv!==lastGv||++fullT>=40){m.g=encG();lastGv=gv;fullT=0;}
         conn.send(m);
       }
     }else if(role===2){
+      if(!over)el+=dt;
       for(const k of [1,2])for(const b of bl[k]){b.x+=b.vx*dt;b.y+=b.vy*dt;}
       for(const k of [1,2])rkd[k]+=(rk[k]-rkd[k])*Math.min(1,dt*20);
     }
   }
+  const tx=fmt(el);if(tx!==tmTxt){tmTxt=tx;$('tm').textContent=tx;}
   draw();requestAnimationFrame(loop);
 }
 
@@ -566,7 +576,7 @@ const KMAP={ArrowUp:'u',w:'u',W:'u',ArrowDown:'d',s:'d',S:'d'};
 addEventListener('keydown',e=>{if(KMAP[e.key]){held.add(KMAP[e.key]);applyHeld();e.preventDefault();}});
 addEventListener('keyup',e=>{if(KMAP[e.key]){held.delete(KMAP[e.key]);applyHeld();}});
 // 터치/마우스 드래그: 손가락이 움직인 만큼의 일정 비율(TOUCH_RATIO)만 라켓이 움직임. 손을 뗐다 다시 대면 현재 라켓 위치에서 이어서 움직임
-const TOUCH_RATIO=0.7,MOUSE_RATIO=1;  // 터치: 손 2 : 라켓 1
+const TOUCH_RATIO=0.5,MOUSE_RATIO=1;  // 터치: 손 2 : 라켓 1
 let pStart=null,lastSendT=0;
 function sendTarget(y,force){
   if(role===1){rt[1]=y;return;}                       // 혼자·호스트: 바로 적용
