@@ -576,7 +576,7 @@ const KMAP={ArrowUp:'u',w:'u',W:'u',ArrowDown:'d',s:'d',S:'d'};
 addEventListener('keydown',e=>{if(KMAP[e.key]){held.add(KMAP[e.key]);applyHeld();e.preventDefault();}});
 addEventListener('keyup',e=>{if(KMAP[e.key]){held.delete(KMAP[e.key]);applyHeld();}});
 // 터치/마우스 드래그: 손가락이 움직인 만큼의 일정 비율(TOUCH_RATIO)만 라켓이 움직임. 손을 뗐다 다시 대면 현재 라켓 위치에서 이어서 움직임
-const TOUCH_RATIO=0.5,MOUSE_RATIO=1;  // 터치: 손 2 : 라켓 1
+const TOUCH_RATIO=0.7,MOUSE_RATIO=1;  // 터치: 손 2 : 라켓 1
 let pStart=null,lastSendT=0;
 function sendTarget(y,force){
   if(role===1){rt[1]=y;return;}                       // 혼자·호스트: 바로 적용
