@@ -233,6 +233,7 @@ const COL=['','#f4b942','#ff6fae'];
 const TINT=['','rgba(244,185,66,.18)','rgba(255,111,174,.18)'],SOLID=['','rgba(244,185,66,.7)','rgba(255,111,174,.7)'];
 let solo=false,soloStream=null,consented=false,echoMode=false,role=0,state='menu',last=0,sendT=0,lastGv=-1,fullT=0,rkd=[0,300,300];
 let local=null,peer=null,lobby=null,conn=null,call=null,session=0,obAct=null;
+let danceImg=null; // 혼자 플레이할 때 상대 자리에 깔리는 배경 이미지(dance1.png / dance2.png 중 랜덤)
 
 function hud(){
   const me=role||1,you=3-me;
@@ -452,7 +453,7 @@ $('ob').onclick=()=>obAct&&obAct();
 
 /* ---------- 혼자 플레이 ---------- */
 function endSolo(){
-  solo=false;document.body.classList.remove('solo');
+  solo=false;document.body.classList.remove('solo');danceImg=null;
   if(soloStream){
     soloStream.getTracks().forEach(t=>t.stop());
     if(lv.srcObject===soloStream)lv.srcObject=null;
@@ -462,6 +463,7 @@ function endSolo(){
 async function startSolo(){ // 상대 자리는 빈 종이 화면, 상대 라켓은 공을 자동으로 따라다님
   cleanup();stopLocal();endSolo();
   solo=true;document.body.classList.add('solo');
+  danceImg=new Image();danceImg.src=Math.random()<0.5?'dance1.png':'dance2.png';
   try{ // 내 카메라는 이 기기 안에서만 쓰고 어디로도 보내지 않음(마이크는 쓰지 않음)
     soloStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:960},height:{ideal:720}},audio:false});
     lv.srcObject=soloStream;lv.play().catch(()=>{});
@@ -496,6 +498,14 @@ function vid(v,r){ // 카메라 영상을 영역 r에 꽉 차게(자르기) 그�
   lg.drawImage(v,(r.w-dw)/2,r.y+(r.h-dh)/2,dw,dh);
   lg.restore();return true;
 }
+function dance(r){ // 상대 자리에 dance 이미지를 영역 r에 꽉 차게(자르기) 그림. 못 불러오면 빈 종이로 대체
+  const im=danceImg;
+  if(!im||!im.complete||!im.naturalWidth)return paper(r);
+  const s=Math.max(r.w/im.naturalWidth,r.h/im.naturalHeight),dw=im.naturalWidth*s,dh=im.naturalHeight*s;
+  lg.save();lg.beginPath();lg.rect(r.x,r.y,r.w,r.h);lg.clip();
+  lg.drawImage(im,r.x+(r.w-dw)/2,r.y+(r.h-dh)/2,dw,dh);
+  lg.restore();return true;
+}
 const SPC=['','#b3261e','#2e8b57','#1e88a8','#7e57c2','#e08a1e'],SPT=['','💣','+9','+2','↔','↕'];
 function drawSp(s,x,y){
   g.fillStyle=SPC[s];g.fillRect(x+1,y+1,B-2,B-2);
@@ -512,7 +522,7 @@ function draw(){
     // 소유자 1(왼쪽)의 카메라 화면은 x 0~800, 소유자 2(오른쪽)의 카메라 화면은 x 200~1000 전체에 걸친 하나의 화면.
     // 마스크(내 영역 + 내가 깬 칸)에 해당하는 부분만 보임
     const rect=k===1?{x:0,y:0,w:800,h:600}:{x:200,y:0,w:800,h:600};
-    if((solo&&cam===rv)?paper(rect):vid(cam,rect)){
+    if((solo&&cam===rv)?dance(rect):vid(cam,rect)){
       lg.globalCompositeOperation='destination-in';lg.imageSmoothingEnabled=false;
       lg.drawImage(mks[k],0,0,FW,FH);g.drawImage(ly,0,0);ok[k]=true;
     }
@@ -603,7 +613,7 @@ cv.addEventListener('pointermove',e=>{
   pStart=null;
 }));
 
-const MENU_MSG='왼쪽(노랑) 또는 오른쪽(분홍) 끝에서 라켓을 위아래로 움직여 공을 튕기세요. 가운데 벽의 구멍으로 공을 넣으면 안쪽 벽돌을 깰 수 있고, 깬 자리에는 카메라 화면이 나타나요. 내 구역과 내가 깬 자리에는 상대 카메라가 보여요. 상대 쪽 구멍은 내 공을 막아요. 상대가 없으면 ‘혼자 플레이하기’로 빈 종이 화면과 자동으로 움직이는 상대와 즐길 수 있어요(이때 카메라는 이 기기 안에서만 쓰여요). 벽 안에는 특수 벽돌 10개가 숨어 있어요: 💣폭탄(폭탄이 중심인 11×11 칸이 터짐), +9·+2(그 자리에서 공 9개·2개 추가), ↔가로줄 제거, ↕세로줄 제거. 벽돌을 모두 깨면 새 공이 더 이상 나오지 않아요. 새 게임은 새로운 상대와 매칭될 때만 시작돼요. 공을 놓치면 5초 뒤 새 공이 나와요. 승패는 없어요. 카메라·마이크는 상대에게만 직접 전달돼요.';
+const MENU_MSG='왼쪽(노랑) 또는 오른쪽(분홍) 끝에서 라켓을 위아래로 움직여 공을 튕기세요. 가운데 벽의 구멍으로 공을 넣으면 안쪽 벽돌을 깰 수 있고, 깬 자리에는 카메라 화면이 나타나요. 내 구역과 내가 깬 자리에는 상대 카메라가 보여요. 상대 쪽 구멍은 내 공을 막아요. 상대가 없으면 ‘혼자 플레이하기’로 랜덤 댄스 이미지 화면과 자동으로 움직이는 상대와 즐길 수 있어요(이때 카메라는 이 기기 안에서만 쓰여요). 벽 안에는 특수 벽돌 10개가 숨어 있어요: 💣폭탄(폭탄이 중심인 11×11 칸이 터짐), +9·+2(그 자리에서 공 9개·2개 추가), ↔가로줄 제거, ↕세로줄 제거. 벽돌을 모두 깨면 새 공이 더 이상 나오지 않아요. 새 게임은 새로운 상대와 매칭될 때만 시작돼요. 공을 놓치면 5초 뒤 새 공이 나와요. 승패는 없어요. 카메라·마이크는 상대에게만 직접 전달돼요.';
 initGame();
 showOv('벽돌깨기 대전',MENU_MSG,'상대 찾기',startFind,true);
 requestAnimationFrame(loop);
